@@ -8,7 +8,10 @@ import (
 	"io"
 	"kpi-test/models"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const events_body_filter string = `{
@@ -65,35 +68,44 @@ func saveFacts(cookie string, facts []*models.FactMysql) (bool, error) {
 
 	fmt.Println("7. Сохраняем факты development.kpi-drive.ru/_api/facts/save_fact")
 
-	body, _ := json.Marshal(&facts)
+	for i := 0; i < len(facts); i++ {
+		fact := facts[i]
+		supertag, _ := json.Marshal(fact.Supertags)
 
-	jsonBody := string(body[:])
-	prettyJson, _ := pretty_string(jsonBody)
-	fmt.Println(prettyJson)
+		form := url.Values{
+			"period_start":            {fact.PeriodStart},
+			"period_end":              {fact.PeriodEnd},
+			"key_period":              {fact.FactTime},
+			"indicator_to_mo_id":      {strconv.Itoa(fact.IndicatorToMoId)},
+			"indicator_to_mo_fact_id": {strconv.Itoa(fact.IndicatorToFactId)},
+			"value":                   {strconv.Itoa(fact.Value)},
+			"fact_time":               {fact.FactTime},
+			"is_plan":                 {strconv.Itoa(fact.IsPlan)},
+			"auth_user_id":            {strconv.Itoa(fact.AuthUserId)},
+			"comment":                 {fact.Comment},
+			"supertags":               {string(supertag[:])}}
 
-	req, err := http.NewRequest("POST",
-		"https://development.kpi-drive.ru/_api/facts/save_fact",
-		bytes.NewReader(body))
+		req, err := http.NewRequest("POST", "https://development.kpi-drive.ru/_api/facts/save_fact", strings.NewReader(form.Encode()))
+		if err != nil {
+			return false, err
+		}
 
-	if err != nil {
-		return false, err
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Add("Cookie", cookie)
+
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			return false, err
+		}
+
+		if resp.StatusCode == 200 {
+			defer resp.Body.Close()
+			resp_body, _ := io.ReadAll(resp.Body)
+
+			fmt.Println("Данные факта сохранены: Ответ от сервера " + string(resp_body))
+		}
 	}
-
-	req.Header.Add("Cookie", cookie)
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return false, err
-	}
-
-	if resp.StatusCode != 200 {
-		fmt.Printf("Упс. Ошибка сохранения факта. Код %d", resp.StatusCode)
-		return false, nil
-	}
-
-	defer resp.Body.Close()
 
 	return true, nil
 
@@ -108,13 +120,19 @@ func convertEventsToFacts(events []*models.Event) ([]*models.FactMysql, error) {
 		event := events[i]
 		fact := models.FactMysql{}
 
+		factTime, err := time.Parse(time.RFC3339, event.Time)
+
+		if err != nil {
+			return nil, err
+		}
+
 		fact.PeriodEnd = event.Params.Period.End
 		fact.PeriodStart = event.Params.Period.Start
 		fact.KeyPeriod = event.Params.Period.TypeKey
-		fact.IndicatorToMoId = event.Params.IndicatorToMoId
+		fact.IndicatorToMoId = 315914 //event.Params.IndicatorToMoId
 		fact.IndicatorToFactId = 0
 		fact.Value = 80
-		fact.FactTime = event.Time
+		fact.FactTime = factTime.Format("2006-01-02")
 		fact.IsPlan = 0
 		fact.Supertags = []models.SuperTag{}
 		fact.AuthUserId = 2
@@ -124,7 +142,7 @@ func convertEventsToFacts(events []*models.Event) ([]*models.FactMysql, error) {
 			models.SuperTag{
 				Value: event.Author.UserName,
 				Tag: models.Tag{
-					Id:           1,
+					Id:           2,
 					Name:         "Клиент",
 					Key:          "client",
 					ValuesSource: 0,
